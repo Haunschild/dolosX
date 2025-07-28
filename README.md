@@ -1,4 +1,4 @@
-# Insurance Claim Call Fraud Detector
+# Fraud Detector
 
 This Streamlit app uses a Large Language Model (LLM) to analyze transcribed insurance claim calls and detect potential fraud.
 
