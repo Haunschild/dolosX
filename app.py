@@ -8,6 +8,8 @@ from dotenv import load_dotenv
 st.set_page_config(page_title="Forensic Linguistic Analyzer", layout="wide")
 load_dotenv()
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+LOGIN_USER = os.getenv('LOGIN_USER', 'admin')
+LOGIN_PASSWORD = os.getenv('LOGIN_PASSWORD', 'claim-x')
 
 # --- Initialization and Error Handling ---
 if not OPENAI_API_KEY:
@@ -19,6 +21,27 @@ if 'analysis_result' not in st.session_state:
     st.session_state.analysis_result = None
 if 'active_filters' not in st.session_state:
     st.session_state.active_filters = []
+
+# --- Simple Login Logic ---
+def login_form():
+    st.title("Login Required")
+    with st.form("login_form"):
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+        submitted = st.form_submit_button("Login")
+        if submitted:
+            if username == LOGIN_USER and password == LOGIN_PASSWORD:
+                st.session_state.logged_in = True
+                st.success("Login successful!")
+            else:
+                st.error("Invalid username or password.")
+
+if 'logged_in' not in st.session_state:
+    st.session_state.logged_in = False
+
+if not st.session_state.logged_in:
+    login_form()
+    st.stop()
 
 # --- Core LLM Logic (Unchanged) ---
 
