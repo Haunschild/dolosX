@@ -2,6 +2,7 @@ import streamlit as st
 import openai
 import os
 import json
+import math
 from dotenv import load_dotenv
 
 # --- Configuration ---
@@ -32,7 +33,7 @@ def login_form():
         if submitted:
             if username == LOGIN_USER and password == LOGIN_PASSWORD:
                 st.session_state.logged_in = True
-                st.success("Login successful!")
+                st.rerun()
             else:
                 st.error("Invalid username or password.")
 
@@ -43,60 +44,29 @@ if not st.session_state.logged_in:
     login_form()
     st.stop()
 
-# --- Core LLM Logic (Unchanged) ---
+# --- Core LLM Logic ---
 
 def create_forensic_prompt(transcript):
     """
-    Creates a comprehensive prompt instructing the LLM to perform a line-by-line forensic analysis,
-    considering BOTH the initial linguistic cues and the advanced narrative cues.
+    Creates a prompt instructing the LLM to perform ONLY a line-by-line forensic analysis.
+    The overall score will be calculated separately by our application.
     """
     prompt = f"""
-    You are a world-class forensic linguist. Your task is to analyze an insurance claim transcript by synthesizing basic linguistic cues with advanced narrative and psychological indicators. You will only comment on lines that contain potential deception cues.
+    You are a world-class forensic linguist. Your task is to analyze an insurance claim transcript by synthesizing basic linguistic cues with advanced narrative and psychological indicators. You will only comment on lines that contain potential deception cues. Your SOLE FOCUS is the line-by-line analysis.
 
     **Analysis Instructions:**
     1.  **Line-by-Line Analysis:** Process the transcript sequentially.
     2.  **Suspicion Score:** Assign a float from 0.0 (benign) to 1.0 (highly deceptive). A score of 0.0 means the line is completely normal.
     3.  **Conditional Commenting & Tagging:**
-        -   **If a line is suspicious (score > 0.0):** You MUST provide a `reason` and a list of `cues_triggered` from the Official Cue List below. The reason should explain how the cues interact.
+        -   **If a line is suspicious (score > 0.0):** You MUST provide a `reason` and a list of `cues_triggered` from the Official Cue List below.
         -   **If a line is NOT suspicious (score = 0.0):** The `reason` MUST be an empty string (`""`) and `cues_triggered` MUST be an empty list (`[]`).
 
     **Official Cue List (Use these exact strings for tagging):**
-
-    **Part 1: Foundational Linguistic Cues**
-    - `Time`: General reference to time (e.g., "yesterday", "in an hour").
-    - `Space`: Mentions of places or distances.
-    - `Motion`: Words indicating movement (e.g., "go", "move", "drive").
-    - `I-Pronouns`: Over or under-use of "I", "my", "me".
-    - `Personal Pronouns`: Use of "we", "you", "they".
-    - `Long Words (>6 letters)`: Proportion of longer, more formal words.
-    - `Negations`: Words like "not", "no", "never".
-    - `Focus: Future`: Statements about future events.
-    - `Focus: Present`: Statements about the present moment.
-    - `Focus: Past`: Statements about past events.
-    - `Risk Language`: Language expressing uncertainty (e.g., "might", "risk", "maybe").
-    - `Cognitive Process`: Words about thinking (e.g., "consider", "think", "understand").
-    - `Sadness`: Language expressing sadness.
-    - `Anger`: Language expressing anger.
-    - `Anxiety`: Language expressing fear or insecurity.
-    - `Negative Emotion`: General negative tone.
-    - `Positive Emotion`: General positive tone.
-
-    **Part 2: Advanced Narrative & Deception Cues**
-    - `Narrative Imbalance`: Excessive detail in some areas, amnesia in others.
-    - `Lack of Context`: Story lacks a natural prologue or epilogue.
-    - `Passive Voice Usage`: Using passive voice to deflect agency (e.g., "the window was broken").
-    - `High Cognitive Load`: High density of fillers ('um', 'uh'), hesitations, or stuttering.
-    - `Question Evasion`: Deflecting, repeating, or not directly answering questions.
-    - `Statement Against Interest`: The *absence* of minor, self-critical details which adds suspicion.
-    - `Inappropriate Emotion`: The emotional tone does not match the described events.
-    - `Overly Formal`: A sudden shift to overly formal or polite language.
-    - `Contradiction`: Statement contradicts previous information.
-    - `Vague Language`: Using non-specific words to avoid commitment.
+    `Time`, `Space`, `Motion`, `I-Pronouns`, `Personal Pronouns`, `Long Words (>6 letters)`, `Negations`, `Focus: Future`, `Focus: Present`, `Focus: Past`, `Risk Language`, `Cognitive Process`, `Sadness`, `Anger`, `Anxiety`, `Negative Emotion`, `Positive Emotion`, `Narrative Imbalance`, `Lack of Context`, `Passive Voice Usage`, `High Cognitive Load`, `Question Evasion`, `Statement Against Interest`, `Inappropriate Emotion`, `Overly Formal`, `Contradiction`, `Vague Language`
 
     **Required Output Format (Strict JSON):**
+    You MUST produce a JSON object containing a brief summary and the detailed line-by-line analysis. Do NOT calculate an overall score yourself.
     {{
-      "overall_deception_probability": <Float>,
-      "final_recommendation": "<'No Red Flags', 'Low Risk', 'Medium Risk', or 'High Risk'>",
       "analysis_summary": "<A 2-3 sentence summary of key findings, referencing the cues.>",
       "all_detected_cues": ["<List of all unique cue strings found in the transcript>"],
       "analyzed_transcript": [
@@ -132,33 +102,60 @@ def analyze_transcript(transcript):
         analysis_result = json.loads(response_content)
         return analysis_result, None
     except Exception as e:
-        return None, f"An unexpected error occurred: {e}"
+        return None, f"An error occurred during analysis: {e}"
+
 
 # --- UI & Styling Helper Functions ---
 
 def score_to_heatmap_color(score):
     """Maps a score (0-1) to a green-yellow-orange-red heatmap color."""
     score = max(0, min(1, score))
-    if score == 0.0:
-        return "#b7e4c7"  # green
-    elif score < 0.15:
-        return "#fff9db"  # very light yellow
-    elif score < 0.3:
-        return "#ffe066"  # light yellow
-    elif score < 0.45:
-        return "#ffd166"  # yellow
-    elif score < 0.6:
-        return "#ffb347"  # light orange
-    elif score < 0.75:
-        return "#ff8800"  # orange
-    elif score < 0.9:
-        return "#ff704d"  # orange-red
-    else:
-        return "#ff4d4d"  # red
+    if score == 0.0: return "#b7e4c7"
+    elif score < 0.15: return "#fff9db"
+    elif score < 0.3: return "#ffe066"
+    elif score < 0.45: return "#ffd166"
+    elif score < 0.6: return "#ffb347"
+    elif score < 0.75: return "#ff8800"
+    elif score < 0.9: return "#ff704d"
+    else: return "#ff4d4d"
+
+def calculate_overall_deception_probability(analyzed_transcript):
+    """
+    Calculates a nuanced overall deception probability based on line-by-line scores.
+    """
+    suspicious_scores = []
+    claimant_line_count = 0
+
+    for line in analyzed_transcript:
+        if line.get("speaker", "").lower() == 'claimant':
+            claimant_line_count += 1
+            score = line.get("suspicion_score", 0.0)
+            if score > 0:
+                suspicious_scores.append(score)
+
+    if not suspicious_scores: return 0.0
+    if claimant_line_count == 0: return 0.0
+
+    power = 2.0
+    raw_deception_sum = sum([s ** power for s in suspicious_scores])
+
+    scaling_factor = 4.0
+    normalized_score = (raw_deception_sum / math.sqrt(claimant_line_count)) * scaling_factor
+
+    probability = math.tanh(normalized_score)
+    return probability
+
+def get_recommendation_from_probability(probability):
+    """Maps a probability score to a categorical risk recommendation."""
+    if probability <= 0.01: return "No Red Flags" # Allow for tiny floating point values
+    elif probability <= 0.35: return "Low Risk"
+    elif probability <= 0.75: return "Medium Risk"
+    else: return "High Risk"
+
 
 # --- Streamlit UI ---
 
-st.title("V-Claim")
+st.title("Dolos AI")
 
 # --- Sidebar ---
 with st.sidebar:
@@ -170,11 +167,11 @@ with st.sidebar:
 
     if st.button("Analyze Transcript", type="primary", use_container_width=True):
         st.session_state.analysis_result = None
+        st.session_state.active_filters = []
         if imported_file:
             try:
                 result = json.load(imported_file)
                 st.session_state.analysis_result = result
-                st.session_state.active_filters = []
                 st.success("Successfully loaded analysis from file.")
             except Exception as e:
                 st.error(f"Failed to read JSON file: {e}")
@@ -182,70 +179,76 @@ with st.sidebar:
             with st.spinner("Performing forensic analysis..."):
                 result, error = analyze_transcript(transcript_text)
                 if error: st.error(error)
-                else:
+                if result:
                     st.session_state.analysis_result = result
-                    st.session_state.active_filters = []
         else:
             st.warning("Please provide a transcript or import a file.")
     
     if st.session_state.analysis_result:
         json_string = json.dumps(st.session_state.analysis_result, indent=2)
         st.download_button(
-            label="Export LLM Analysis (JSON)", data=json_string,
-            file_name="llm_analysis.json", mime="application/json", use_container_width=True
+            label="Export Analysis (JSON)", data=json_string,
+            file_name="forensic_analysis.json", mime="application/json", use_container_width=True
         )
 
     if st.session_state.analysis_result:
         st.divider()
         st.subheader("Highlight Cues")
         all_cues = st.session_state.analysis_result.get("all_detected_cues", [])
-        if all_cues:
+        if all_cues and isinstance(all_cues, list):
             st.session_state.active_filters = st.multiselect(
-                "Select cues to highlight:", options=all_cues, default=st.session_state.active_filters
+                "Select cues to highlight:", options=sorted(all_cues), default=st.session_state.active_filters
             )
 
 # --- Main Display Area ---
 if st.session_state.analysis_result:
     result = st.session_state.analysis_result
     analyzed_lines = result.get("analyzed_transcript", [])
+    
+    # THIS IS THE CRITICAL SECTION:
+    # We calculate the probability and recommendation here in Python,
+    # completely ignoring any summary values from the LLM.
+    prob = calculate_overall_deception_probability(analyzed_lines)
+    rec = get_recommendation_from_probability(prob)
+    
+    # We add the calculated values to the session state so they are included
+    # in the JSON export for a complete record.
+    st.session_state.analysis_result['calculated_deception_probability'] = prob
+    st.session_state.analysis_result['calculated_final_recommendation'] = rec
+
     active_filters = st.session_state.active_filters
 
     st.header("Analysis Dashboard", divider='rainbow')
-    prob = result.get("overall_deception_probability", None)
-    rec = result.get("final_recommendation", None)
-    if prob is not None:
-        st.markdown(f"**Overall Deception Probability:** {prob:.2%}")
-    if rec:
-        st.markdown(f"**Final Recommendation:** {rec}")
-    summary = result.get("analysis_summary", None)
-    if summary: st.markdown(f"**Summary:** {summary}")
     
+    # Display the calculated values.
+    st.markdown(f"**Overall Deception Probability:** `{prob:.2%}`")
+    st.markdown(f"**Final Recommendation:** `{rec}`")
+    summary = result.get("analysis_summary", None)
+    if summary: st.markdown(f"**LLM Summary:** *{summary}*")
+
     st.markdown("**Deception Timeline**")
     
-    # --- FIXED: Proportional Timeline with Min/Max Width ---
     timeline_html = "<div style='display: flex; width: 100%; height: 20px; gap: 2px;'>"
-    MIN_FLEX = 10 # Set a minimum width basis
-    MAX_FLEX = 150 # Set a maximum width basis to prevent extreme dominance
-    for line in analyzed_lines:
-        score = line.get('suspicion_score', 0)
-        color = score_to_heatmap_color(score)
-        text_length = len(line.get('text', ''))
-        # Clamp the flex value to ensure visibility
-        flex = max(MIN_FLEX, min(MAX_FLEX, text_length))
-        
-        timeline_html += f"<a href='#line-{line.get('line_number', 0)}' style='flex-grow: {flex}; background-color: {color}; border-radius: 2px;' title='Line {line.get('line_number', 0)} | Score: {score:.2f}'></a>"
+    if analyzed_lines:
+        for line in analyzed_lines:
+            score = line.get('suspicion_score', 0)
+            color = score_to_heatmap_color(score)
+            text_length = len(line.get('text', ''))
+            flex = max(10, min(150, text_length))
+            line_num = line.get('line_number', 0)
+            timeline_html += f"<a href='#line-{line_num}' style='flex-grow: {flex}; background-color: {color}; border-radius: 2px;' title='Line {line_num} | Score: {score:.2f}'></a>"
     timeline_html += "</div>"
     st.markdown(timeline_html, unsafe_allow_html=True)
 
-    # --- FIXED: Two-Sided Interactive Chat with Reliable Popover ---
     st.subheader("Interactive Transcript")
     
     chat_container = st.container()
 
     for line in analyzed_lines:
         with chat_container:
-            # Add invisible anchor div with negative offset for accurate scrolling
-            st.markdown(f"<div id='line-{line.get('line_number')}' style='position: relative; top: -40px; height: 0; margin: 0; padding: 0;'></div>", unsafe_allow_html=True)
+            line_num = line.get('line_number')
+            st.markdown(f"<div id='line-{line_num}' style='position: relative; top: -60px;'></div>", unsafe_allow_html=True)
+            
             speaker = line.get("speaker", "Unknown").lower()
             text = line.get("text", "")
             score = line.get("suspicion_score", 0)
@@ -253,37 +256,28 @@ if st.session_state.analysis_result:
             is_suspicious = score > 0
             is_filtered = any(cue in active_filters for cue in cues)
             
-            # Create an invisible anchor for accurate scrolling
-            st.markdown(f"<div id='line-{line.get('line_number')}'></div>", unsafe_allow_html=True)
-
             bubble_style = f"""
-                border-radius: 20px;
-                padding: 10px 15px;
-                max-width: 100%; /* The column will handle the max-width */
+                border-radius: 20px; padding: 10px 15px; max-width: 100%;
                 border: {'2px solid #00BFFF' if is_filtered else 'none'};
-                margin-bottom: 10px;
-                display: inline-block; /* Important for alignment */
+                margin-bottom: 10px; display: inline-block; word-wrap: break-word;
             """
             
             if speaker == 'agent':
-                # Agent bubble on the left
-                bubble_style += f"background-color: #F1F3F5; color: #212529;"
+                bubble_style += "background-color: #F1F3F5; color: #212529;"
                 st.markdown(f"<div style='display: flex; justify-content: flex-start;'><div style='{bubble_style}'>{text}</div></div>", unsafe_allow_html=True)
-            
-            else: # Claimant bubble on the right
+            else:
                 bubble_color = score_to_heatmap_color(score)
                 bubble_style += f"background-color: {bubble_color}; color: #212529;"
                 
-                cols = st.columns([1, 12, 1], gap="small") # Use columns for stable right-alignment
-                with cols[1]: # The middle, expanding column
+                cols = st.columns([1, 12, 1], gap="small")
+                with cols[1]:
                     st.markdown(f"<div style='display: flex; justify-content: flex-end;'><div style='{bubble_style}'>{text}</div></div>", unsafe_allow_html=True)
 
                 if is_suspicious:
-                    with cols[2]: # The narrow column for the icon
+                    with cols[2]:
                         with st.popover("❗"):
-                            st.markdown(f"**Suspicion Score:** {score:.2f}")
-                            st.markdown(f"**Reason:** {line.get('reason', '')}")
-                            if cues: st.markdown("**Cues:**\n- " + "\n- ".join(cues))
-
+                            st.markdown(f"**Suspicion Score:** `{score:.2f}`")
+                            st.markdown(f"**Reason:** {line.get('reason', 'N/A')}")
+                            if cues: st.markdown("**Cues:**\n- " + "\n- ".join(f"`{cue}`" for cue in cues))
 else:
     st.info("Upload or paste a transcript and click 'Analyze Transcript' in the sidebar to begin.")
